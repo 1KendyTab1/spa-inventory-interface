@@ -3,16 +3,14 @@ import {
   getFirestore,
   collection,
   onSnapshot,
-  deleteDoc,
-  doc,
-  updateDoc
+  updateDoc,
+  doc
 } from "firebase/firestore";
 import {
   getStorage,
   ref,
   uploadBytes,
-  getDownloadURL,
-  listAll
+  getDownloadURL
 } from "firebase/storage";
 import { initializeApp } from "firebase/app";
 
@@ -31,142 +29,58 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const spasCollection = collection(db, "spas");
 
-const translations = {
-  fr: {
-    title: "Inventaire des spas",
-    filter: "Filtrer par couleur...",
-    manufacturer: "Fabricant",
-    dimensions: "Dimensions",
-    seats: "Places",
-    coverQuality: "Qualité de la couverture",
-    coverColor: "Couleur de la couverture",
-    pumps: "Pompes",
-    mainLight: "Lumière principale",
-    smallLights: "Petites lumières",
-    frameStatus: "Cadre",
-    heater: "Chauffage",
-    condition: "État",
-    price: "Prix",
-    delete: "Supprimer",
-    edit: "Modifier",
-    save: "Enregistrer",
-    cancel: "Annuler",
-    total: "Total",
-    photos: "Photos"
-  },
-  uk: {
-    title: "Список СПА",
-    filter: "Фільтр за кольором...",
-    manufacturer: "Виробник",
-    dimensions: "Розміри",
-    seats: "Кількість місць",
-    coverQuality: "Якість покриття",
-    coverColor: "Колір покриття",
-    pumps: "Кількість насосів",
-    mainLight: "Основне світло",
-    smallLights: "Малі світла",
-    frameStatus: "Каркас",
-    heater: "Нагрівач",
-    condition: "Стан",
-    price: "Ціна",
-    delete: "Видалити",
-    edit: "Редагувати",
-    save: "Зберегти",
-    cancel: "Скасувати",
-    total: "Всього",
-    photos: "Фотографії"
-  }
-};
-
 export default function SpaInventory() {
   const [spas, setSpas] = useState([]);
   const [lang, setLang] = useState("uk");
-  const [filterStatus, setFilterStatus] = useState("");
-  const [filterColor, setFilterColor] = useState("");
-  const [editingSpaId, setEditingSpaId] = useState(null);
-  const [editData, setEditData] = useState({});
-  const [images, setImages] = useState({});
+
+  const translations = {
+    uk: {
+      title: "Список СПА",
+      addPhotos: "Додати фото",
+      uploading: "Завантаження...",
+      noPhotos: "Немає фото"
+    },
+    fr: {
+      title: "Inventaire des spas",
+      addPhotos: "Ajouter des photos",
+      uploading: "Téléchargement...",
+      noPhotos: "Pas de photos"
+    }
+  };
 
   const t = translations[lang];
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(spasCollection, async (snapshot) => {
+    const unsubscribe = onSnapshot(spasCollection, (snapshot) => {
       const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setSpas(data);
-
-      // Завантажити фото для кожного SPA
-      const allImages = {};
-      for (const spa of data) {
-        const folderRef = ref(storage, `spa_images/${spa.id}`);
-        try {
-          const files = await listAll(folderRef);
-          const urls = await Promise.all(files.items.map((item) => getDownloadURL(item)));
-          allImages[spa.id] = urls;
-        } catch {
-          allImages[spa.id] = [];
-        }
-      }
-      setImages(allImages);
     });
-
     return () => unsubscribe();
   }, []);
 
-  const handleImageUpload = async (e, spaId) => {
+  const handleFileChange = async (e, spaId) => {
     const files = e.target.files;
-    if (!files.length) return;
+    if (!files || files.length === 0) return;
 
-    const uploadPromises = Array.from(files).map(async (file) => {
-      const fileRef = ref(storage, `spa_images/${spaId}/${file.name}`);
+    const urls = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const fileRef = ref(storage, `spas/${spaId}/${file.name}`);
       await uploadBytes(fileRef, file);
-      return getDownloadURL(fileRef);
+      const url = await getDownloadURL(fileRef);
+      urls.push(url);
+    }
+
+    const spaDoc = doc(db, "spas", spaId);
+    await updateDoc(spaDoc, {
+      images: urls // або [...(spa.images || []), ...urls] щоб не стерти попередні
     });
-
-    const newUrls = await Promise.all(uploadPromises);
-    setImages((prev) => ({
-      ...prev,
-      [spaId]: [...(prev[spaId] || []), ...newUrls]
-    }));
   };
 
-  const handleEditChange = (field, value) => {
-    setEditData({ ...editData, [field]: value });
-  };
-
-  const startEditing = (spa) => {
-    setEditingSpaId(spa.id);
-    setEditData(spa);
-  };
-
-  const cancelEditing = () => {
-    setEditingSpaId(null);
-    setEditData({});
-  };
-
-  const saveEdit = async () => {
-    try {
-      const docRef = doc(db, "spas", editingSpaId);
-      await updateDoc(docRef, editData);
-      cancelEditing();
-    } catch (err) {
-      console.error("Помилка при оновленні:", err);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (confirm("Ви впевнені, що хочете видалити цей SPA?")) {
-      const docRef = doc(db, "spas", id);
-      await deleteDoc(docRef);
-    }
-  };
-
-  const filteredSpas = spas.filter((spa) =>
-    (!filterStatus || spa.status === filterStatus) &&
-    (!filterColor || spa.coverColor?.toLowerCase().includes(filterColor.toLowerCase()))
-  );
   return (
     <div style={{ padding: "1rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
         <h1>{t.title}</h1>
         <select value={lang} onChange={(e) => setLang(e.target.value)}>
           <option value="uk">🇺🇦 Українська</option>
@@ -174,103 +88,38 @@ export default function SpaInventory() {
         </select>
       </div>
 
-      <div style={{ margin: "1rem 0", display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="">Всі статуси</option>
-          <option value="не продано">Не продано</option>
-          <option value="зарезервовано">Зарезервовано</option>
-          <option value="на ремонті">На ремонті</option>
-          <option value="продано">Продано</option>
-        </select>
-
-        <input
-          type="text"
-          placeholder={t.filter}
-          value={filterColor}
-          onChange={(e) => setFilterColor(e.target.value)}
-        />
-
-        <div style={{ fontWeight: "bold" }}>{t.total}: {filteredSpas.length}</div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: "1rem" }}>
-        {filteredSpas.map((spa) => (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "1rem" }}>
+        {spas.map((spa) => (
           <div key={spa.id} style={{ border: "1px solid #ccc", borderRadius: "8px", padding: "1rem" }}>
-            {editingSpaId === spa.id ? (
-              <>
-                {["manufacturer", "dimensions", "seats", "coverQuality", "coverColor", "pumps", "frameStatus", "heater", "price"].map((field) => (
-                  <div key={field}>
-                    <label><strong>{t[field] || field}:</strong></label>
-                    <input
-                      type="text"
-                      value={editData[field] || ""}
-                      onChange={(e) => handleEditChange(field, e.target.value)}
-                      style={{ width: "100%", marginBottom: "0.5rem" }}
-                    />
-                  </div>
-                ))}
+            <h3>{spa.manufacturer || "SPA"}</h3>
+            <p><strong>Розміри:</strong> {spa.dimensions}</p>
+            <p><strong>Ціна:</strong> {spa.price}</p>
 
-                {/* Select for status */}
-                <div>
-                  <label><strong>{t.condition}:</strong></label>
-                  <select
-                    value={editData.status || ""}
-                    onChange={(e) => handleEditChange("status", e.target.value)}
-                    style={{ width: "100%", marginBottom: "0.5rem" }}
-                  >
-                    <option value="">---</option>
-                    <option value="не продано">Не продано</option>
-                    <option value="зарезервовано">Зарезервовано</option>
-                    <option value="на ремонті">На ремонті</option>
-                    <option value="продано">Продано</option>
-                  </select>
-                </div>
+            <div>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => handleFileChange(e, spa.id)}
+              />
+              <p style={{ fontStyle: "italic", color: "#555" }}>{t.addPhotos}</p>
+            </div>
 
-                <button onClick={saveEdit} style={{ marginRight: "0.5rem" }}>{t.save}</button>
-                <button onClick={cancelEditing}>{t.cancel}</button>
-              </>
-            ) : (
-              <>
-                <p><strong>{t.manufacturer}:</strong> {spa.manufacturer}</p>
-                <p><strong>{t.dimensions}:</strong> {spa.dimensions}</p>
-                <p><strong>{t.seats}:</strong> {spa.seats}</p>
-                <p><strong>{t.coverQuality}:</strong> {spa.coverQuality}</p>
-                <p><strong>{t.coverColor}:</strong> {spa.coverColor}</p>
-                <p><strong>{t.pumps}:</strong> {spa.pumps}</p>
-                <p><strong>{t.mainLight}:</strong> {spa.mainLight ? "✔️" : "❌"}</p>
-                <p><strong>{t.smallLights}:</strong> {spa.smallLights ? "✔️" : "❌"}</p>
-                <p><strong>{t.frameStatus}:</strong> {spa.frameStatus}</p>
-                <p><strong>{t.heater}:</strong> {spa.heater}</p>
-                <p><strong>{t.condition}:</strong> {spa.status}</p>
-                <p><strong>{t.price}:</strong> ${spa.price}</p>
-
-                {/* Фотографії */}
-                <div>
-                  <strong>{t.photos}:</strong>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.5rem" }}>
-                    {(images[spa.id] || []).map((url, i) => (
-                      <img key={i} src={url} alt="spa" style={{ width: "70px", height: "70px", objectFit: "cover", borderRadius: "4px" }} />
-                    ))}
-                  </div>
-                  <input
-                    type="file"
-                    multiple
-                    onChange={(e) => handleImageUpload(e, spa.id)}
-                    style={{ marginTop: "0.5rem" }}
+            <div style={{ display: "flex", gap: "0.5rem", overflowX: "auto", marginTop: "0.5rem" }}>
+              {spa.images?.length > 0 ? (
+                spa.images.map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`spa-${spa.id}-${i}`}
+                    style={{ height: "80px", borderRadius: "4px", cursor: "pointer" }}
+                    onClick={() => window.open(url, "_blank")}
                   />
-                </div>
-
-                <button onClick={() => startEditing(spa)} style={{ marginTop: "0.5rem", marginRight: "0.5rem" }}>
-                  {t.edit}
-                </button>
-                <button
-                  onClick={() => handleDelete(spa.id)}
-                  style={{ marginTop: "0.5rem", background: "red", color: "white", border: "none", padding: "5px 10px", cursor: "pointer" }}
-                >
-                  {t.delete}
-                </button>
-              </>
-            )}
+                ))
+              ) : (
+                <span>{t.noPhotos}</span>
+              )}
+            </div>
           </div>
         ))}
       </div>
