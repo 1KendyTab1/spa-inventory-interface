@@ -13,6 +13,7 @@ import {
   getDownloadURL
 } from "firebase/storage";
 import { initializeApp } from "firebase/app";
+import { v4 as uuidv4 } from "uuid";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDE2RbPr7wEOSV8t0f9QDwjHClI0wOhXAQ",
@@ -29,25 +30,62 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const spasCollection = collection(db, "spas");
 
+const translations = {
+  fr: {
+    title: "Inventaire des spas",
+    manufacturer: "Fabricant",
+    dimensions: "Dimensions",
+    seats: "Places",
+    coverQuality: "Qualité de la couverture",
+    coverColor: "Couleur de la couverture",
+    pumps: "Pompes (eau)",
+    blower: "Souffleur d'air",
+    mainLight: "Lumière principale",
+    smallLights: "Petites lumières",
+    frameStatus: "Cadre",
+    heater: "Chauffage",
+    condition: "État",
+    price: "Prix",
+    status: "Statut",
+    note: "Remarques",
+    uploadPhoto: "Ajouter des photos",
+    statusOptions: {
+      sold: "Vendu",
+      reserved: "Réservé",
+      repair: "En réparation",
+      available: "Non vendu"
+    }
+  },
+  uk: {
+    title: "Список СПА",
+    manufacturer: "Виробник",
+    dimensions: "Розміри",
+    seats: "Кількість місць",
+    coverQuality: "Якість покриття",
+    coverColor: "Колір покриття",
+    pumps: "Кількість насосів (водяних)",
+    blower: "Повітряний нагнітач",
+    mainLight: "Основне світло",
+    smallLights: "Малі світла",
+    frameStatus: "Стан каркасу",
+    heater: "Нагрівач",
+    condition: "Стан",
+    price: "Ціна",
+    status: "Статус",
+    note: "Нотатка",
+    uploadPhoto: "Додати фото",
+    statusOptions: {
+      sold: "Продано",
+      reserved: "Резерв",
+      repair: "В ремонті",
+      available: "Не продано"
+    }
+  }
+};
+
 export default function SpaInventory() {
   const [spas, setSpas] = useState([]);
-  const [lang, setLang] = useState("uk");
-
-  const translations = {
-    uk: {
-      title: "Список СПА",
-      addPhotos: "Додати фото",
-      uploading: "Завантаження...",
-      noPhotos: "Немає фото"
-    },
-    fr: {
-      title: "Inventaire des spas",
-      addPhotos: "Ajouter des photos",
-      uploading: "Téléchargement...",
-      noPhotos: "Pas de photos"
-    }
-  };
-
+  const [lang, setLang] = useState(localStorage.getItem("lang") || "uk");
   const t = translations[lang];
 
   useEffect(() => {
@@ -58,67 +96,103 @@ export default function SpaInventory() {
     return () => unsubscribe();
   }, []);
 
-  const handleFileChange = async (e, spaId) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleLangChange = (e) => {
+    const newLang = e.target.value;
+    localStorage.setItem("lang", newLang);
+    setLang(newLang);
+  };
 
-    const urls = [];
+  const handleStatusChange = async (id, status) => {
+    const refDoc = doc(db, "spas", id);
+    await updateDoc(refDoc, { status });
+  };
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const fileRef = ref(storage, `spas/${spaId}/${file.name}`);
+  const handleNoteChange = async (id, note) => {
+    const refDoc = doc(db, "spas", id);
+    await updateDoc(refDoc, { note });
+  };
+
+  const handleUpload = async (id, files) => {
+    const uploaded = [];
+    for (const file of files) {
+      const fileRef = ref(storage, `spas/${id}/${uuidv4()}`);
       await uploadBytes(fileRef, file);
       const url = await getDownloadURL(fileRef);
-      urls.push(url);
+      uploaded.push(url);
     }
-
-    const spaDoc = doc(db, "spas", spaId);
-    await updateDoc(spaDoc, {
-      images: urls // або [...(spa.images || []), ...urls] щоб не стерти попередні
-    });
+    const refDoc = doc(db, "spas", id);
+    const spa = spas.find((s) => s.id === id);
+    await updateDoc(refDoc, { photos: [...(spa.photos || []), ...uploaded] });
   };
 
   return (
     <div style={{ padding: "1rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{t.title}</h1>
-        <select value={lang} onChange={(e) => setLang(e.target.value)}>
+        <select value={lang} onChange={handleLangChange}>
           <option value="uk">🇺🇦 Українська</option>
           <option value="fr">🇫🇷 Français</option>
         </select>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "1rem" }}>
+      <div style={{ display: "flex", overflowX: "auto", gap: "1rem", marginTop: "1rem" }}>
         {spas.map((spa) => (
-          <div key={spa.id} style={{ border: "1px solid #ccc", borderRadius: "8px", padding: "1rem" }}>
-            <h3>{spa.manufacturer || "SPA"}</h3>
-            <p><strong>Розміри:</strong> {spa.dimensions}</p>
-            <p><strong>Ціна:</strong> {spa.price}</p>
+          <div
+            key={spa.id}
+            style={{
+              border: "1px solid #ccc",
+              borderRadius: "8px",
+              padding: "1rem",
+              minWidth: "320px"
+            }}
+          >
+            <p><strong>{t.manufacturer}:</strong> {spa.manufacturer}</p>
+            <p><strong>{t.dimensions}:</strong> {spa.dimensions}</p>
+            <p><strong>{t.seats}:</strong> {spa.seats}</p>
+            <p><strong>{t.coverQuality}:</strong> {spa.coverQuality}</p>
+            <p><strong>{t.coverColor}:</strong> {spa.coverColor}</p>
+            <p><strong>{t.pumps}:</strong> {spa.pumps}</p>
+            <p><strong>{t.blower}:</strong> {spa.blower}</p>
+            <p><strong>{t.mainLight}:</strong> {spa.mainLight ? "✔️" : "❌"}</p>
+            <p><strong>{t.smallLights}:</strong> {spa.smallLights ? "✔️" : "❌"}</p>
+            <p><strong>{t.frameStatus}:</strong> {spa.frameStatus}</p>
+            <p><strong>{t.heater}:</strong> {spa.heater}</p>
+            <p><strong>{t.condition}:</strong> {spa.condition}</p>
+            <p><strong>{t.price}:</strong> ${spa.price}</p>
 
-            <div>
+            <p><strong>{t.status}:</strong>
+              <select
+                value={spa.status}
+                onChange={(e) => handleStatusChange(spa.id, e.target.value)}
+              >
+                <option value="sold">{t.statusOptions.sold}</option>
+                <option value="reserved">{t.statusOptions.reserved}</option>
+                <option value="repair">{t.statusOptions.repair}</option>
+                <option value="available">{t.statusOptions.available}</option>
+              </select>
+            </p>
+
+            <p><strong>{t.note}:</strong></p>
+            <textarea
+              rows={2}
+              defaultValue={spa.note || ""}
+              onBlur={(e) => handleNoteChange(spa.id, e.target.value)}
+              style={{ width: "100%" }}
+            />
+
+            <div style={{ marginTop: "0.5rem" }}>
+              <strong>{t.uploadPhoto}:</strong>
               <input
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(e) => handleFileChange(e, spa.id)}
+                onChange={(e) => handleUpload(spa.id, e.target.files)}
               />
-              <p style={{ fontStyle: "italic", color: "#555" }}>{t.addPhotos}</p>
-            </div>
-
-            <div style={{ display: "flex", gap: "0.5rem", overflowX: "auto", marginTop: "0.5rem" }}>
-              {spa.images?.length > 0 ? (
-                spa.images.map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    alt={`spa-${spa.id}-${i}`}
-                    style={{ height: "80px", borderRadius: "4px", cursor: "pointer" }}
-                    onClick={() => window.open(url, "_blank")}
-                  />
-                ))
-              ) : (
-                <span>{t.noPhotos}</span>
-              )}
+              <div style={{ display: "flex", gap: "5px", marginTop: "5px", flexWrap: "wrap" }}>
+                {(spa.photos || []).map((url, index) => (
+                  <img key={index} src={url} alt={`spa-${index}`} style={{ width: "60px", height: "60px", objectFit: "cover", borderRadius: "4px" }} />
+                ))}
+              </div>
             </div>
           </div>
         ))}
